@@ -1,0 +1,29 @@
+@import "tailwindcss";
+
+/* Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Dark tile filter for Leaflet map */
+.leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.75) saturate(0.7);
+}
+
+/* Leaflet popup styling */
+.leaflet-popup-content-wrapper {
+  background: #12122a;
+  color: #e0e0ff;
+  border: 1px solid #2a2a4a;
+}
+
+.leaflet-popup-tip {
+  background: #12122a;
+}
