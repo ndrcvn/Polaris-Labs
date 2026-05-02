@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>✦ Astrocartography</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:#0a0a1a;color:#e0e0ff;font-family:Georgia,serif;overflow:hidden}
+  #app{display:flex;flex-direction:column;height:100vh}
+  h1{color:#FFD700;font-size:1.1rem;text-align:center;padding:6px 8px 2px;letter-spacing:.06em}
+  .birth{color:#aabbcc;font-size:.7rem;text-align:center;padding-bottom:4px}
+  #planet-bar{display:flex;flex-wrap:wrap;gap:4px;justify-content:center;padding:4px 8px;flex-shrink:0}
+  #line-bar{display:flex;gap:6px;justify-content:center;padding:2px 8px 4px;flex-shrink:0}
+  button.planet{border-radius:8px;padding:2px 8px;font-size:.7rem;cursor:pointer;border-width:1px;border-style:solid;background:#1a1a2e;transition:background .15s}
+  button.linetype{border-radius:4px;padding:2px 10px;font-size:.7rem;cursor:pointer;border:1px solid #444;background:#1a1a2e;color:#ccc;transition:background .15s}
+  button.linetype.on{background:#ffffff20;border-color:#888;color:#fff}
+  #map{flex:1;min-height:0}
+  .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.75) saturate(.7)}
+  .leaflet-popup-content-wrapper{background:#12122a;color:#e0e0ff;border:1px solid #2a2a4a}
+  .leaflet-popup-tip{background:#12122a}
+  #info{background:#12122a;border-top:1px solid #2a2a4a;padding:8px 14px;flex-shrink:0;min-height:52px;font-size:.72rem;line-height:1.5}
+  #info h3{font-size:.8rem;margin-bottom:2px}
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>✦ Astrocartography ✦</h1>
+  <div class="birth">July 1, 1989 · 9:30 PM GMT · Milan, Italy</div>
+  <div id="planet-bar"></div>
+  <div id="line-bar"></div>
+  <div id="map"></div>
+  <div id="info"></div>
+</div>
+
+<script>
+// ── Astronomy ──────────────────────────────────────────────────────────────
+const D2R=Math.PI/180, R2D=180/Math.PI;
+const rad=d=>d*D2R, deg=r=>r*R2D;
+const n360=a=>((a%360)+360)%360;
+
+function jday(y,m,d,h){
+  if(m<=2){y--;m+=12;}
+  const A=Math.floor(y/100), B=2-A+Math.floor(A/4);
+  return Math.floor(365.25*(y+4716))+Math.floor(30.6001*(m+1))+d+B-1524.5+h/24;
+}
+
+function gst0(jd){
+  const T=(jd-2451545)/36525;
+  return n360(280.46061837+360.98564736629*(jd-2451545)+0.000387933*T*T);
+}
+
+function planetLons(jd){
+  const T=(jd-2451545)/36525, s=a=>Math.sin(rad(a));
+  const Ms=n360(357.52911+35999.05029*T);
+  const C=(1.914602-0.004817*T)*s(Ms)+(0.019993-0.000101*T)*s(2*Ms)+0.000289*s(3*Ms);
+  const sun=n360(280.46646+36000.76983*T+C);
+  const mL=n360(218.3165+481267.8813*T),mM=n360(134.9634+477198.8676*T);
+  const mD=n360(297.8502+445267.1115*T),mF=n360(93.2721+483202.0175*T);
+  const moon=n360(mL+6.2888*s(mM)+1.274*s(2*mD-mM)+0.6583*s(2*mD)+0.2136*s(2*mM)-0.1851*s(mD)-0.1143*s(2*mF));
+  const meM=n360(168.6562+149472.5153*T);
+  const mercury=n360(252.2509+149472.6674*T+23.44*s(meM)+2.98*s(2*meM));
+  const vM=n360(48.0052+58517.8039*T);
+  const venus=n360(181.9798+58517.8156*T+0.7758*s(vM));
+  const maM=n360(19.373+19140.3023*T);
+  const mars=n360(355.433+19140.2993*T+10.6912*s(maM)+0.6228*s(2*maM));
+  const jM=n360(20.9+3034.906*T);
+  const jupiter=n360(34.3515+3034.9057*T+5.5549*s(jM)+0.1683*s(2*jM));
+  const saM=n360(317.02+1222.114*T);
+  const saturn=n360(50.0774+1222.1138*T+6.3585*s(saM)+0.2204*s(2*saM));
+  const urM=n360(141.05+428.48*T);
+  const uranus=n360(313.7+428.49*T+5.3*s(urM));
+  const neM=n360(256.23+218.46*T);
+  const neptune=n360(295.99+218.46*T+1.0*s(neM));
+  const pluto=n360(238.9+144.96*(T/100));
+  return{Sun:sun,Moon:moon,Mercury:mercury,Venus:venus,Mars:mars,Jupiter:jupiter,Saturn:saturn,Uranus:uranus,Neptune:neptune,Pluto:pluto};
+}
+
+function toEq(lon,eps){
+  const l=rad(lon),e=rad(eps);
+  return{ra:n360(deg(Math.atan2(Math.sin(l)*Math.cos(e),Math.cos(l)))),dec:deg(Math.asin(Math.sin(e)*Math.sin(l)))};
+}
+
+function computePlanets(jd){
+  const T=(jd-2451545)/36525, eps=23.439291111-0.013004167*T;
+  const lons=planetLons(jd), result={};
+  for(const[name,lon]of Object.entries(lons)){
+    const{ra,dec}=toEq(lon,eps);
+    result[name]={lon,ra,dec};
+  }
+  return result;
+}
+
+function mcLon(ra,gst){const g=((ra-gst)%360+360)%360; return g>180?g-360:g;}
+function icLon(ra,gst){let l=mcLon(ra,gst)+180; return l>180?l-360:l;}
+function ascLon(ra,dec,lat,gst){
+  const v=-Math.tan(rad(lat))*Math.tan(rad(dec));
+  if(Math.abs(v)>1)return null;
+  const H=deg(Math.acos(v));
+  const g=((n360(ra-H)-gst)%360+360)%360; return g>180?g-360:g;
+}
+function dscLon(ra,dec,lat,gst){
+  const v=-Math.tan(rad(lat))*Math.tan(rad(dec));
+  if(Math.abs(v)>1)return null;
+  const H=deg(Math.acos(v));
+  const g=((n360(ra+H)-gst)%360+360)%360; return g>180?g-360:g;
+}
+
+function buildVertical(lon){return[[[-85,lon],[85,lon]]];}
+function buildCurved(ra,dec,gst,fn){
+  const segs=[];let seg=[],prev=null;
+  for(let lat=85;lat>=-85;lat-=0.5){
+    const lon=fn(ra,dec,lat,gst);
+    if(lon===null){if(seg.length>1)segs.push(seg);seg=[];prev=null;continue;}
+    if(prev!==null&&Math.abs(lon-prev)>80){if(seg.length>1)segs.push(seg);seg=[];prev=null;}
+    seg.push([lat,lon]);prev=lon;
+  }
+  if(seg.length>1)segs.push(seg);
+  return segs;
+}
+function getSegs(planet,type,gst){
+  const{ra,dec}=planet;
+  if(type==='MC')return buildVertical(mcLon(ra,gst));
+  if(type==='IC')return buildVertical(icLon(ra,gst));
+  if(type==='ASC')return buildCurved(ra,dec,gst,ascLon);
+  return buildCurved(ra,dec,gst,dscLon);
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────
+const PLANET_NAMES=['Sun','Moon','Mercury','Venus','Mars','Jupiter','Saturn','Uranus','Neptune','Pluto'];
+const COLORS={Sun:'#FFD700',Moon:'#d0d0d0',Mercury:'#87CEEB',Venus:'#FF69B4',Mars:'#FF4500',Jupiter:'#FFA500',Saturn:'#DAA520',Uranus:'#40E0D0',Neptune:'#6688FF',Pluto:'#DA70D6'};
+const SYMBOLS={Sun:'☉',Moon:'☽',Mercury:'☿',Venus:'♀',Mars:'♂',Jupiter:'♃',Saturn:'♄',Uranus:'♅',Neptune:'♆',Pluto:'♇'};
+const ZODIAC=['Aries','Taurus','Gemini','Cancer','Leo','Virgo','Libra','Scorpio','Sagittarius','Capricorn','Aquarius','Pisces'];
+const LINE_TYPES=['MC','IC','ASC','DSC'];
+const LINE_DASH={MC:null,IC:[10,7],ASC:null,DSC:[6,4]};
+function zodiacSign(lon){return`${ZODIAC[Math.floor(lon/30)]} ${(lon%30).toFixed(1)}°`;}
+
+const MEANINGS={
+  MC:{Sun:'Career and public life radiate here — recognition and leadership come naturally.',Moon:'Public nurturing roles and emotional community ties define your calling.',Mercury:'Communication, writing, and teaching — your voice carries great influence.',Venus:'Creative success, beauty, and social influence shape your reputation.',Mars:'Ambition amplified — bold career moves and competitive drive pay off.',Jupiter:'Expansion and professional luck flow here — opportunities find you.',Saturn:'Discipline and long-term achievement — serious authority is earned.',Uranus:'Innovation and disruption lead to unexpected notoriety.',Neptune:'Artistic vocation and spiritual public calling draw admirers.',Pluto:'Transformative power and lasting legacy define your place in history.'},
+  IC:{Sun:'Home and inner identity are deeply rooted here — a place of belonging.',Moon:'Ancestral roots, emotional safety, and family bonds are strongest here.',Mercury:'A stimulating home environment where ideas and conversations flourish.',Venus:'Beautiful, harmonious domestic life and an aesthetically rich home.',Mars:'Active, passionate home and family life full of energy and drive.',Jupiter:'Expansive, fortunate home and generous family ties surround you.',Saturn:'Structured, serious approach to home and heritage — deep responsibilities.',Uranus:'Unconventional home life — freedom and originality in your private world.',Neptune:'Dreamy, spiritual, or creative home environment full of imagination.',Pluto:'Deep family transformation and powerful ancestral roots shape you.'},
+  ASC:{Sun:'Radiant vitality — you shine and attract attention effortlessly.',Moon:'Emotional sensitivity and intuition are heightened in daily life.',Mercury:'Sharp wit and youthful energy — effortless, charming communication.',Venus:'Magnetic beauty and grace — others find you naturally irresistible.',Mars:'Bold, energetic presence — you lead and inspire those around you.',Jupiter:'Optimism and generosity radiate — expansion naturally follows you.',Saturn:'Serious, disciplined presence — others respect your depth and gravity.',Uranus:'Electric, eccentric aura — you stand out as brilliantly original.',Neptune:'Mystical, dreamy impression — spiritual magnetism draws seekers.',Pluto:'Intense, magnetic — your presence transforms everyone you meet.'},
+  DSC:{Sun:'Power partnerships — you shine brightest with a strong, vital partner.',Moon:'Emotionally nurturing, deeply intuitive and caring relationships.',Mercury:'Intellectual bonds and witty, mentally stimulating connections.',Venus:'Romantic, harmonious — beautiful love and artful partnerships.',Mars:'Passionate, dynamic, and excitingly charged relationships.',Jupiter:'Lucky, growth-oriented partnerships — mutual expansion and generosity.',Saturn:'Serious, committed long-term bonds; karmic ties that endure.',Uranus:'Exciting, unconventional — liberating and awakening relationships.',Neptune:'Soulmate connections and deeply spiritual, transcendent bonds.',Pluto:'Intense, fated, powerfully transformative relationships.'}
+};
+
+// ── State ──────────────────────────────────────────────────────────────────
+const JD=jday(1989,7,1,21.5), GST=gst0(JD);
+const PLANETS=computePlanets(JD);
+let selectedPlanet='Sun', showAll=false;
+let activeLines=new Set(['MC','IC','ASC','DSC']);
+let drawnLayers=[];
+
+// ── Map ────────────────────────────────────────────────────────────────────
+const map=L.map('map',{center:[20,0],zoom:2,zoomControl:true});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  attribution:'© OpenStreetMap contributors',maxZoom:18
+}).addTo(map);
+
+const starIcon=L.divIcon({html:'<div style="font-size:22px;line-height:1;text-shadow:0 0 6px #FFD700">★</div>',className:'',iconAnchor:[11,11]});
+L.marker([45.4654,9.1859],{icon:starIcon}).addTo(map).bindPopup('<strong style="color:#FFD700">★ Milan</strong><br/>Your birthplace');
+
+function redrawLines(){
+  drawnLayers.forEach(l=>map.removeLayer(l));
+  drawnLayers=[];
+  const names=showAll?PLANET_NAMES:(selectedPlanet?[selectedPlanet]:[]);
+  for(const name of names){
+    const color=COLORS[name];
+    for(const lt of LINE_TYPES){
+      if(!activeLines.has(lt))continue;
+      const segs=getSegs(PLANETS[name],lt,GST);
+      const dash=LINE_DASH[lt];
+      for(const pts of segs){
+        const pl=L.polyline(pts,{color,weight:2.5,opacity:.95,dashArray:dash?dash.join(' '):undefined});
+        pl.addTo(map);
+        drawnLayers.push(pl);
+      }
+    }
+  }
+}
+
+// ── Info panel ─────────────────────────────────────────────────────────────
+function updateInfo(){
+  const el=document.getElementById('info');
+  if(showAll){
+    el.innerHTML=`<h3 style="color:#FFD700">All Planets</h3><span style="color:#bbbbdd">Showing ${[...activeLines].join(', ')} lines for all planets. Tap a planet to focus.</span>`;
+    return;
+  }
+  if(!selectedPlanet){el.innerHTML='<span style="color:#555">Select a planet to see its lines.</span>';return;}
+  const color=COLORS[selectedPlanet], p=PLANETS[selectedPlanet];
+  const types=[...activeLines].filter(lt=>LINE_TYPES.includes(lt));
+  const interp=types.map(lt=>`<strong style="color:${color}">${lt}:</strong> ${MEANINGS[lt][selectedPlanet]}`).join('<br/>');
+  el.innerHTML=`<h3 style="color:${color}">${SYMBOLS[selectedPlanet]} ${selectedPlanet} · ${zodiacSign(p.lon)}</h3><span style="color:#bbbbdd">${interp}</span>`;
+}
+
+// ── Controls ───────────────────────────────────────────────────────────────
+function renderPlanetBar(){
+  const bar=document.getElementById('planet-bar');
+  bar.innerHTML='';
+  for(const name of PLANET_NAMES){
+    const color=COLORS[name], isOn=!showAll&&selectedPlanet===name;
+    const btn=document.createElement('button');
+    btn.className='planet';
+    btn.textContent=`${SYMBOLS[name]} ${name}`;
+    btn.style.borderColor=color;
+    btn.style.color=color;
+    btn.style.background=isOn?`${color}33`:'#1a1a2e';
+    btn.onclick=()=>{selectedPlanet=name;showAll=false;renderPlanetBar();redrawLines();updateInfo();};
+    bar.appendChild(btn);
+  }
+  const all=document.createElement('button');
+  all.className='planet';
+  all.textContent='🌐 All';
+  all.style.borderColor='#888';
+  all.style.color='#ccc';
+  all.style.background=showAll?'#ffffff22':'#1a1a2e';
+  all.onclick=()=>{showAll=true;selectedPlanet=null;renderPlanetBar();redrawLines();updateInfo();};
+  bar.appendChild(all);
+}
+
+function renderLineBar(){
+  const bar=document.getElementById('line-bar');
+  bar.innerHTML='';
+  for(const lt of LINE_TYPES){
+    const btn=document.createElement('button');
+    btn.className='linetype'+(activeLines.has(lt)?' on':'');
+    btn.textContent=lt;
+    btn.onclick=()=>{
+      if(activeLines.has(lt)&&activeLines.size===1)return;
+      if(activeLines.has(lt))activeLines.delete(lt); else activeLines.add(lt);
+      renderLineBar();redrawLines();updateInfo();
+    };
+    bar.appendChild(btn);
+  }
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────
+renderPlanetBar();
+renderLineBar();
+redrawLines();
+updateInfo();
+</script>
+</body>
+</html>
